@@ -82,14 +82,6 @@ st.markdown("""
         font-family: monospace;
     }
 
-    /* THE BOXED TOTAL STYLE (BUTTON-BASED) */
-    div[data-testid="stHorizontalBlock"] .total-btn > div > button {
-        border: 4px solid #333 !important;
-        background-color: white !important;
-        color: #333 !important;
-        font-size: 24px !important;
-    }
-
     hr { margin-top: 5px !important; margin-bottom: 10px !important; }
     
     .thick-alert {
@@ -102,20 +94,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE FINAL FIX) ---
-creds_info = st.secrets["connections"]["gsheets"].to_dict()
-
-# Scrub private key for Python 3.13 formatting
-if "private_key" in creds_info:
-    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
-
-# Isolated connection call to prevent keyword 'type' clash
-conn = st.connection(
-    "gsheets", 
-    type=GSheetsConnection, 
-    service_account=creds_info
-)
-
+# --- 2. DATA CONNECTION (THE CLEAN 2026 METHOD) ---
+# We use the built-in automated connection to avoid TypeError clashing
+conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -133,7 +114,6 @@ def show_toss_popup(row_idx):
     if c1.button("No, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS"):
-        # Log to 'tossed' if the column exists
         if 'tossed' in df.columns:
             df.at[row_idx, 'tossed'] = float(df.at[row_idx].get('tossed', 0)) + 0.5
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
@@ -196,7 +176,6 @@ h2.markdown("<div class='column-label'>RESERVE</div>", unsafe_allow_html=True)
 h3.markdown("<div class='column-label'>STOCK</div>", unsafe_allow_html=True)
 h4.markdown("<div class='column-label'>TOTAL</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
-
 st.divider()
 
 # --- 5. INVENTORY LIST ---
@@ -204,7 +183,7 @@ display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
-# Sorting: In stock at top, then out of stock
+# Sorting: In stock at the top
 stocked = display_df[display_df['stock'] > 0]
 out = display_df[display_df['stock'] <= 0]
 sorted_display = pd.concat([stocked, out])
@@ -212,11 +191,9 @@ sorted_display = pd.concat([stocked, out])
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
     
-    # Flavor Name (Cleaned)
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Dots)
     res_val = int(row['reserve'])
     res_label = "● " * res_val if res_val > 0 else "Empty"
     if c2.button(res_label, key=f"res_{idx}"):
@@ -225,11 +202,9 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) + 1
             save_data(df)
 
-    # STOCK (Dots & ◒)
     stk_val = float(row['stock'])
     stk_visual = ("● " * int(stk_val)) + ("◒" if stk_val % 1 != 0 else "")
     if stk_visual == "": stk_visual = "Out"
-
     if c3.button(stk_visual, key=f"stk_{idx}"):
         if stk_val % 1 != 0: 
             show_toss_popup(idx)
@@ -237,13 +212,12 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) - 0.5
             save_data(df)
 
-    # TOTAL (Boxed actual number)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
     
     with c4:
         tc1, tc2 = st.columns([2, 1])
-        # Boxed total button style
+        # Boxed Total (Actual Number)
         if tc1.button(f"[ {int(total_val)} ]", key=f"tot_{idx}"):
             show_detail(idx)
         if needs_attention:
