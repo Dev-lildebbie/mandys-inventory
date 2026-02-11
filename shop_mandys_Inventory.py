@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- 1. SETUP & THEME (LOCKED IN) ---
+# --- 1. SETUP & THEME (EVERY DETAIL LOCKED IN) ---
 st.set_page_config(page_title="Mandy's Inventory", layout="wide")
 
 st.markdown("""
@@ -46,7 +46,7 @@ st.markdown("""
         margin-top: -5px !important;
     }
 
-    /* SEARCH BAR - NO WHITE CORNERS */
+    /* SEARCH BAR & INPUTS */
     div[data-baseweb="input"] {
         border: 5px solid #F06292 !important;
         border-radius: 12px !important;
@@ -92,7 +92,7 @@ st.markdown("""
         margin-bottom: 10px !important;
     }
     
-    /* THE THICK "!" ALERT */
+    /* THE THICK "!" ALERT OUTSIDE */
     .thick-alert {
         font-size: 32px;
         font-weight: 900;
@@ -113,9 +113,8 @@ def save_data(df_to_save):
     conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
-# Load the shop's real live data
+# Load real-time data from the sheet
 df = load_data()
-# Convert to dictionary for the UI loop
 inventory_list = df.to_dict(orient="records")
 
 # --- 3. DIALOGS (POPUPS) ---
@@ -125,6 +124,7 @@ def show_toss_popup(row_idx):
     flavor = inventory_list[row_idx]
     st.write(f"Record a loss for **{flavor['name']}**?")
     c1, c2 = st.columns(2)
+    # PHRASING LOCKED [cite: 02-11-2026]
     if c1.button("NO, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS TUB"):
@@ -197,17 +197,16 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.divider()
 
-# --- 5. INVENTORY LIST ---
-# Split into stocked/unstocked for sorting
+# --- 5. INVENTORY LIST (SORTED BY STOCK) ---
 stocked_indices = [i for i, f in enumerate(inventory_list) if f['stock'] > 0]
 out_indices = [i for i, f in enumerate(inventory_list) if f['stock'] <= 0]
 
 for idx in stocked_indices + out_indices:
     f = inventory_list[idx]
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
-    c1.markdown(f<div class='flavor-name'>{f['name']}</div>, unsafe_allow_html=True)
+    c1.markdown(f"<div class='flavor-name'>{f['name']}</div>", unsafe_allow_html=True)
     
-    # RESERVE DOTS -> MOVES TO STOCK
+    # RESERVE DOTS (Tubs to Stock)
     res_count = int(f['reserve'])
     res_dots = "● " * res_count if res_count > 0 else "Empty"
     if c2.button(res_dots, key=f"res_{idx}"):
@@ -217,13 +216,13 @@ for idx in stocked_indices + out_indices:
             save_data(df)
             st.rerun()
 
-    # STOCK DOTS -> OPENS TOSS POPUP
+    # STOCK DOTS (Toss popup)
     stk_count = int(f['stock'])
     stk_dots = "● " * stk_count if stk_count > 0 else "Out"
     if c3.button(stk_dots, key=f"stk_{idx}"):
         show_toss_popup(idx)
 
-    # BOXED TOTAL WITH THICK OUTSIDE ALERT
+    # BOXED TOTAL WITH THICK OUTSIDE ALERT [cite: 02-11-2026]
     total = int(f['reserve']) + int(f['stock'])
     needs_attention = (total <= int(f['low'])) or (int(f['reserve']) == 0)
     
