@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- 1. SETUP & THEME (EVERY PETTY DETAIL LOCKED) ---
+# --- 1. SETUP & THEME (ALL STYLES INCLUDED) ---
 st.set_page_config(page_title="Mandy's Inventory", layout="wide")
 
 st.markdown("""
@@ -81,8 +81,8 @@ st.markdown("""
         padding: 0px 10px !important;
         font-family: monospace;
     }
-    
-    /* BOXED TOTAL STYLE */
+
+    /* THE BOXED TOTAL STYLE */
     .total-box-styled {
         border: 4px solid #333;
         padding: 2px 10px;
@@ -91,6 +91,8 @@ st.markdown("""
         font-size: 24px;
         background-color: white;
         display: inline-block;
+        text-align: center;
+        min-width: 60px;
     }
 
     hr {
@@ -108,13 +110,31 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (WITH PEM FIX) ---
-# This block pulls the secrets and "scrubs" the private key to prevent ASN.1 parsing errors
-creds = st.secrets["connections"]["gsheets"].to_dict()
-if "private_key" in creds:
-    creds["private_key"] = creds["private_key"].strip().replace("\\n", "\n")
+# --- 2. DATA CONNECTION (THE "SCRUBBER" LOGIC) ---
+# Pull raw secrets and clean up formatting issues manually
+raw_creds = st.secrets["connections"]["gsheets"].to_dict()
 
-conn = st.connection("gsheets", type=GSheetsConnection, **creds)
+service_account_info = {
+    "type": raw_creds.get("type"),
+    "project_id": raw_creds.get("project_id"),
+    "private_key_id": raw_creds.get("private_key_id"),
+    "private_key": raw_creds.get("private_key").strip().replace("\\n", "\n"),
+    "client_email": raw_creds.get("client_email"),
+    "client_id": raw_creds.get("client_id"),
+    "auth_uri": raw_creds.get("auth_uri"),
+    "token_uri": raw_creds.get("token_uri"),
+    "auth_provider_x509_cert_url": raw_creds.get("auth_provider_x509_cert_url"),
+    "client_x509_cert_url": raw_creds.get("client_x509_cert_url"),
+    "universe_domain": raw_creds.get("universe_domain")
+}
+
+conn = st.connection(
+    "gsheets", 
+    type=GSheetsConnection, 
+    spreadsheet=raw_creds.get("spreadsheet"),
+    service_account=service_account_info
+)
+
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -129,9 +149,10 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name']
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    if c1.button("NO, someone will eat it"):
+    if c1.button("NO, keep it"):
         st.rerun()
-    if c2.button("YES, TOSS TUB"):
+    if c2.button("YES, TOSS"):
+        # Subtract the half-tub to zero it out
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
         save_data(df)
 
@@ -179,7 +200,7 @@ def add_flavor_popup():
 # --- 4. TOP SECTION ---
 st.markdown("<div class='main-header'><h1>Mandy's Inventory</h1></div>", unsafe_allow_html=True)
 
-st.markdown("<div class='command-zone'>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
 h1, h2, h3, h4 = st.columns([3, 4, 4, 2])
 with h1:
     col_a, col_b = st.columns([3, 1])
@@ -194,21 +215,24 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.divider()
 
-# --- 5. INVENTORY LIST ---
+# --- 5. INVENTORY LIST (SORTED & FORMATTED) ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
-# Sorting: In-stock flavors at the top
+# Layout Rule: In-stock flavors top, out-of-stock below
 stocked = display_df[display_df['stock'] > 0]
 out_of_stock = display_df[display_df['stock'] <= 0]
 sorted_display = pd.concat([stocked, out_of_stock])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
-    c1.markdown(f"<div class='flavor-name'>{row['name']}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Dots)
+    # Flavor Name (Cleaned of "(Active)")
+    clean_name = row['name'].replace("(Active)", "").strip()
+    c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
+    
+    # RESERVE (Tapping moves 1 to stock)
     res_val = int(row['reserve'])
     res_dots = "● " * res_val if res_val > 0 else "Empty"
     if c2.button(res_dots, key=f"res_{idx}"):
@@ -217,7 +241,7 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] += 1
             save_data(df)
 
-    # STOCK (Dots & Half-Dots)
+    # STOCK (Scooped/Half-tub logic)
     stk_val = float(row['stock'])
     full_tubs = int(stk_val)
     is_scooped = (stk_val % 1 != 0)
@@ -228,17 +252,20 @@ for idx, row in sorted_display.iterrows():
         if is_scooped:
             show_toss_popup(idx)
         else:
+            # Turn a full tub into a half-scooped tub
             df.at[idx, 'stock'] -= 0.5
             save_data(df)
 
-    # TOTAL (Actual number, boxed)
+    # TOTAL (Boxed actual number)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row['low'])) or (float(row['reserve']) == 0)
     
     with c4:
         tc1, tc2 = st.columns([2, 1])
-        # Boxed Total
-        if tc1.button(f"[ {int(total_val)} ]", key=f"tot_{idx}"):
+        # Boxed Number total
+        tc1.markdown(f"<div class='total-box-styled'>{int(total_val)}</div>", unsafe_allow_html=True)
+        # Deep Dive access hidden behind a small clickable area or if needed we can add a button
+        if tc1.button("🔍", key=f"det_{idx}"):
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
