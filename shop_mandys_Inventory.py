@@ -65,12 +65,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE SCRUBBER) ---
-creds = st.secrets["connections"]["gsheets"].to_dict()
-if "private_key" in creds:
-    creds["private_key"] = creds["private_key"].replace("\\n", "\n").strip()
-
-conn = st.connection("gsheets")
+# --- 2. DATA CONNECTION (THE COMPATIBILITY FIX) ---
+# We keep this as simple as possible so it reads your secrets perfectly.
+conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -146,7 +143,7 @@ h3.markdown("<div class='column-label'>STOCK</div>", unsafe_allow_html=True)
 h4.markdown("<div class='column-label'>TOTAL</div>", unsafe_allow_html=True)
 st.divider()
 
-# --- 5. LIST (SORTED BY STOCK) ---
+# --- 5. LIST (SORTED: STOCKED AT TOP) ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
@@ -157,6 +154,7 @@ sorted_display = pd.concat([stocked, out])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
+    
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
@@ -174,12 +172,13 @@ for idx, row in sorted_display.iterrows():
     stk_visual = ("● " * int(stk_val)) + ("◒" if stk_val % 1 != 0 else "")
     if stk_visual == "": stk_visual = "Out"
     if c3.button(stk_visual, key=f"stk_{idx}"):
-        if stk_val % 1 != 0: show_toss_popup(idx)
+        if stk_val % 1 != 0: 
+            show_toss_popup(idx)
         else:
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) - 0.5
             save_data(df)
 
-    # TOTAL (Actual Boxed Number)
+    # TOTAL (Boxed Number)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
     with c4:
@@ -188,7 +187,3 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
-
-
-
-
