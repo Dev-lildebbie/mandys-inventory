@@ -11,26 +11,37 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stAppDeployButton {display:none;}
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
+    
+    .block-container {
+        padding-top: 0.5rem !important;
+        padding-bottom: 2rem !important;
+    }
 
+    /* THE MAIN TRUCK BORDER & YELLOW BG */
     .stApp {
         background-color: #FFEB3B; 
         border: 30px solid #F06292;
     }
     
+    /* MAIN TEAL HEADER */
     .main-header {
         background-color: #00BCD4;
-        padding: 8px; color: white;
-        text-align: center; border: 6px solid #F06292; 
+        padding: 8px;
+        color: white;
+        text-align: center;
+        border: 6px solid #F06292; 
         border-radius: 15px;
         margin-bottom: 0px !important;
     }
     .main-header h1 {
-        font-size: 45px; font-weight: 900;
-        letter-spacing: 3px; margin: 0;
+        font-size: 45px; 
+        font-weight: 900;
+        letter-spacing: 3px;
+        margin: 0;
         text-transform: uppercase;
     }
 
+    /* SEARCH BAR */
     div[data-baseweb="input"] {
         border: 5px solid #F06292 !important;
         border-radius: 12px !important;
@@ -43,17 +54,23 @@ st.markdown("""
         padding: 5px !important;
     }
 
+    /* COLUMN LABELS */
     .column-label {
-        font-weight: 900; color: #333;
-        font-size: 26px; text-transform: uppercase;
+        font-weight: 900;
+        color: #333;
+        font-size: 26px;
+        text-transform: uppercase;
         margin-bottom: -10px !important;
     }
     
     .flavor-name { 
-        font-size: 22px; font-weight: 900; 
-        color: #333; text-transform: uppercase;
+        font-size: 22px; 
+        font-weight: 900; 
+        color: #333; 
+        text-transform: uppercase;
     }
 
+    /* BUTTONS / DOTS STYLE */
     div.stButton > button {
         background-color: #00BCD4 !important;
         color: white !important;
@@ -65,22 +82,35 @@ st.markdown("""
         font-family: monospace;
     }
 
+    /* THE BOXED TOTAL STYLE */
+    .total-box-styled {
+        border: 4px solid #333;
+        padding: 2px 10px;
+        border-radius: 8px;
+        font-weight: 900;
+        font-size: 24px;
+        background-color: white;
+        display: inline-block;
+        text-align: center;
+        min-width: 60px;
+    }
+
     hr { margin-top: 5px !important; margin-bottom: 10px !important; }
     
     .thick-alert {
-        font-size: 32px; font-weight: 900;
-        color: #F06292; margin-left: 8px;
+        font-size: 32px;
+        font-weight: 900;
+        color: #F06292;
+        margin-left: 8px;
         vertical-align: middle;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE SCRUBBER FIX) ---
-# We manually pull and fix the private key formatting before connecting
+# --- 2. DATA CONNECTION (THE SCRUBBER) ---
 creds = st.secrets["connections"]["gsheets"].to_dict()
 if "private_key" in creds:
-    # This line fixes the 'load_pem_private_key' error
-    creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+    creds["private_key"] = creds["private_key"].replace("\\n", "\n").strip()
 
 conn = st.connection("gsheets", type=GSheetsConnection, **creds)
 df = conn.read(ttl="0s")
@@ -97,9 +127,12 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name']
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
+    # Locked Detail: Phrasing
     if c1.button("No, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS"):
+        if 'tossed' in df.columns:
+            df.at[row_idx, 'tossed'] = float(df.at[row_idx].get('tossed', 0)) + 0.5
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
         save_data(df)
 
@@ -107,6 +140,7 @@ def show_toss_popup(row_idx):
 def show_detail(row_idx):
     flavor = df.iloc[row_idx]
     st.subheader(f"📊 {flavor['name']}")
+    
     col1, col2, col3 = st.columns(3)
     col1.metric("Res", int(flavor['reserve']))
     col2.metric("Stk", float(flavor['stock']))
@@ -129,6 +163,9 @@ def show_detail(row_idx):
         df.at[row_idx, 'high'] = new_high
         df.at[row_idx, 'low'] = new_low
         save_data(df)
+    
+    if st.button("Close", use_container_width=True):
+        st.rerun()
 
 @st.dialog("Create New Flavor")
 def add_flavor_popup():
@@ -156,6 +193,7 @@ h2.markdown("<div class='column-label'>RESERVE</div>", unsafe_allow_html=True)
 h3.markdown("<div class='column-label'>STOCK</div>", unsafe_allow_html=True)
 h4.markdown("<div class='column-label'>TOTAL</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
+
 st.divider()
 
 # --- 5. INVENTORY LIST ---
@@ -163,14 +201,15 @@ display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
-# Sorting: In-stock flavors at the top
+# Sorting: Stocked first, Out of Stock second
 stocked = display_df[display_df['stock'] > 0]
-out = display_df[display_df['stock'] <= 0]
-sorted_display = pd.concat([stocked, out])
+out_of_stock = display_df[display_df['stock'] <= 0]
+sorted_display = pd.concat([stocked, out_of_stock])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
     
+    # Flavor Name (Cleaned)
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
@@ -183,17 +222,21 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) + 1
             save_data(df)
 
-    # STOCK (Dots & ◒)
+    # STOCK (Dots & Scooped ◒)
     stk_val = float(row['stock'])
-    stk_visual = ("● " * int(stk_val)) + ("◒" if stk_val % 1 != 0 else "")
+    full_tubs = int(stk_val)
+    is_scooped = (stk_val % 1 != 0)
+    stk_visual = ("● " * full_tubs) + ("◒" if is_scooped else "")
     if stk_visual == "": stk_visual = "Out"
+
     if c3.button(stk_visual, key=f"stk_{idx}"):
-        if stk_val % 1 != 0: show_toss_popup(idx)
+        if is_scooped:
+            show_toss_popup(idx)
         else:
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) - 0.5
             save_data(df)
 
-    # TOTAL (Boxed actual number)
+    # TOTAL (Boxed Number)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
     
