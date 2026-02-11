@@ -41,7 +41,7 @@ st.markdown("""
         text-transform: uppercase;
     }
 
-    /* SEARCH BAR - NO WHITE CORNERS */
+    /* SEARCH BAR */
     div[data-baseweb="input"] {
         border: 5px solid #F06292 !important;
         border-radius: 12px !important;
@@ -95,10 +95,7 @@ st.markdown("""
         min-width: 60px;
     }
 
-    hr {
-        margin-top: 5px !important;
-        margin-bottom: 10px !important;
-    }
+    hr { margin-top: 5px !important; margin-bottom: 10px !important; }
     
     .thick-alert {
         font-size: 32px;
@@ -110,23 +107,29 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE 2026 BULLETPROOF METHOD) ---
-# 1. Get the connection secrets
-conn_secrets = st.secrets["connections"]["gsheets"]
-
-# 2. Clean the private key if it exists
-if "private_key" in conn_secrets:
-    # We create a new dict so we don't mutate the read-only secrets object
-    creds_dict = conn_secrets.to_dict()
+# --- 2. DATA CONNECTION (THE "NO CLASH" METHOD) ---
+# We pull secrets into a dictionary and fix the key formatting
+creds_dict = st.secrets["connections"]["gsheets"].to_dict()
+if "private_key" in creds_dict:
     creds_dict["private_key"] = creds_dict["private_key"].strip().replace("\\n", "\n")
-    
-    # 3. Connect using the cleaned dictionary
-    conn = st.connection("gsheets", type=GSheetsConnection, **creds_dict)
-else:
-    # Fallback if secrets are already clean
-    conn = st.connection("gsheets", type=GSheetsConnection)
+
+# To prevent the 'type' keyword error, we pop the URL out and 
+# pass the rest as service_account info
+spreadsheet_url = creds_dict.pop("spreadsheet", None)
+
+conn = st.connection(
+    "gsheets", 
+    type=GSheetsConnection, 
+    spreadsheet=spreadsheet_url,
+    service_account=creds_dict
+)
 
 df = conn.read(ttl="0s")
+
+def save_data(updated_df):
+    conn.update(data=updated_df)
+    st.cache_data.clear()
+    st.rerun()
 
 # --- 3. DIALOGS (POPUPS) ---
 
@@ -135,7 +138,7 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name']
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    # Detail: Specific phrasing requested
+    # Locked detail: phrasing
     if c1.button("No, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS"):
@@ -201,12 +204,11 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.divider()
 
-# --- 5. INVENTORY LIST (SORTED & FORMATTED) ---
+# --- 5. INVENTORY LIST ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
-# Sorting Rule: In-stock flavors at the top, out-of-stock below
 stocked = display_df[display_df['stock'] > 0]
 out_of_stock = display_df[display_df['stock'] <= 0]
 sorted_display = pd.concat([stocked, out_of_stock])
@@ -214,11 +216,11 @@ sorted_display = pd.concat([stocked, out_of_stock])
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
     
-    # Flavor Name (Removes (Active) tag)
+    # Flavor Name (No Active tag)
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Dots for tubs)
+    # RESERVE (Dots)
     res_val = int(row['reserve'])
     res_label = "● " * res_val if res_val > 0 else "Empty"
     if c2.button(res_label, key=f"res_{idx}"):
@@ -227,7 +229,7 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] += 1
             save_data(df)
 
-    # STOCK (Dots & Scooped ◒)
+    # STOCK (Dots & ◒)
     stk_val = float(row['stock'])
     full_tubs = int(stk_val)
     is_scooped = (stk_val % 1 != 0)
@@ -241,17 +243,13 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] -= 0.5
             save_data(df)
 
-    # TOTAL (Boxed actual number)
+    # TOTAL (Boxed)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
     
     with c4:
         tc1, tc2 = st.columns([2, 1])
-        # Boxed Number total - Clicking opens Deep Dive
         if tc1.button(f"[ {int(total_val)} ]", key=f"tot_{idx}"):
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
-
-
-
