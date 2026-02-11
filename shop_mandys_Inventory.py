@@ -93,7 +93,7 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name'].replace("(Active)", "").strip()
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    if c1.button("NO, KEEP IT"):
+    if c1.button("NO, Someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS"):
         # Fix: Properly check if column exists and update the value
@@ -209,4 +209,5 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
+
 
