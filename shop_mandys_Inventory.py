@@ -107,12 +107,20 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE SCRUBBER) ---
-creds = st.secrets["connections"]["gsheets"].to_dict()
-if "private_key" in creds:
-    creds["private_key"] = creds["private_key"].replace("\\n", "\n").strip()
+# --- 2. DATA CONNECTION (THE FINAL FIX) ---
+# We isolate the credentials into their own dict to avoid the 'type' conflict
+creds_info = st.secrets["connections"]["gsheets"].to_dict()
 
-conn = st.connection("gsheets", type=GSheetsConnection, **creds)
+if "private_key" in creds_info:
+    creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n").strip()
+
+# Explicitly pass the dictionary to 'service_account' instead of using **kwargs
+conn = st.connection(
+    "gsheets", 
+    type=GSheetsConnection, 
+    service_account=creds_info
+)
+
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -127,7 +135,6 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name']
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    # Locked Detail: Phrasing
     if c1.button("No, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS"):
@@ -180,7 +187,6 @@ def add_flavor_popup():
 
 # --- 4. TOP SECTION ---
 st.markdown("<div class='main-header'><h1>Mandy's Inventory</h1></div>", unsafe_allow_html=True)
-
 st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
 h1, h2, h3, h4 = st.columns([3, 4, 4, 2])
 with h1:
@@ -201,15 +207,14 @@ display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
-# Sorting: Stocked first, Out of Stock second
+# Sorting: In stock at top
 stocked = display_df[display_df['stock'] > 0]
-out_of_stock = display_df[display_df['stock'] <= 0]
-sorted_display = pd.concat([stocked, out_of_stock])
+out = display_df[display_df['stock'] <= 0]
+sorted_display = pd.concat([stocked, out])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
     
-    # Flavor Name (Cleaned)
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
@@ -222,21 +227,19 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) + 1
             save_data(df)
 
-    # STOCK (Dots & Scooped ◒)
+    # STOCK (Dots & ◒)
     stk_val = float(row['stock'])
-    full_tubs = int(stk_val)
-    is_scooped = (stk_val % 1 != 0)
-    stk_visual = ("● " * full_tubs) + ("◒" if is_scooped else "")
+    stk_visual = ("● " * int(stk_val)) + ("◒" if stk_val % 1 != 0 else "")
     if stk_visual == "": stk_visual = "Out"
 
     if c3.button(stk_visual, key=f"stk_{idx}"):
-        if is_scooped:
+        if stk_val % 1 != 0: 
             show_toss_popup(idx)
         else:
             df.at[idx, 'stock'] = float(df.at[idx, 'stock']) - 0.5
             save_data(df)
 
-    # TOTAL (Boxed Number)
+    # TOTAL (Boxed actual number)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
     
