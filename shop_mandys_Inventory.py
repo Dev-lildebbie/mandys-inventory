@@ -90,14 +90,17 @@ df = load_data()
 
 @st.dialog("Toss this tub?")
 def show_toss_popup(row_idx):
-    flavor_name = df.at[row_idx, 'name']
+    flavor_name = df.at[row_idx, 'name'].replace("(Active)", "").strip()
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    if c1.button("NO, someone will eat it"):
+    if c1.button("NO, KEEP IT"):
         st.rerun()
-    if c2.button("YES, TOSS TUB"):
-        # Record loss and remove the half tub
-        df.at[row_idx, 'tossed'] = float(df.at[row_idx].get('tossed', 0)) + 0.5
+    if c2.button("YES, TOSS"):
+        # Fix: Properly check if column exists and update the value
+        current_tossed = float(df.at[row_idx, 'tossed']) if 'tossed' in df.columns else 0
+        df.at[row_idx, 'tossed'] = current_tossed + 0.5
+        
+        # Subtract the half tub from stock
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
         save_data(df)
 
@@ -206,3 +209,4 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
+
