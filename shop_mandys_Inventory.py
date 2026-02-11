@@ -110,18 +110,35 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (CLEANSED CONNECTION) ---
+# --- 2. DATA CONNECTION (THE FINAL HANDSHAKE) ---
 raw_creds = st.secrets["connections"]["gsheets"].to_dict()
-if "private_key" in raw_creds:
-    raw_creds["private_key"] = raw_creds["private_key"].strip().replace("\\n", "\n")
 
-conn = st.connection("gsheets", type=GSheetsConnection, **raw_creds)
+# We pull the Google info but RENAME 'type' to 'account_type' 
+# so it doesn't clash with Streamlit's 'type' parameter
+service_account_info = {
+    "type": raw_creds.get("type"),
+    "project_id": raw_creds.get("project_id"),
+    "private_key_id": raw_creds.get("private_key_id"),
+    "private_key": raw_creds.get("private_key").strip().replace("\\n", "\n"),
+    "client_email": raw_creds.get("client_email"),
+    "client_id": raw_creds.get("client_id"),
+    "auth_uri": raw_creds.get("auth_uri"),
+    "token_uri": raw_creds.get("token_uri"),
+    "auth_provider_x509_cert_url": raw_creds.get("auth_provider_x509_cert_url"),
+    "client_x509_cert_url": raw_creds.get("client_x509_cert_url"),
+    "universe_domain": raw_creds.get("universe_domain")
+}
+
+# CONNECTING: type=GSheetsConnection is the "how", 
+# service_account=service_account_info is the "who"
+conn = st.connection(
+    "gsheets", 
+    type=GSheetsConnection, 
+    spreadsheet=raw_creds.get("spreadsheet"),
+    service_account=service_account_info
+)
+
 df = conn.read(ttl="0s")
-
-def save_data(updated_df):
-    conn.update(data=updated_df)
-    st.cache_data.clear()
-    st.rerun()
 
 # --- 3. DIALOGS (POPUPS) ---
 
@@ -247,4 +264,5 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
+
 
