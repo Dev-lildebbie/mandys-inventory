@@ -81,6 +81,17 @@ st.markdown("""
         padding: 0px 10px !important;
         font-family: monospace;
     }
+    
+    /* BOXED TOTAL STYLE */
+    .total-box-styled {
+        border: 4px solid #333;
+        padding: 2px 10px;
+        border-radius: 8px;
+        font-weight: 900;
+        font-size: 24px;
+        background-color: white;
+        display: inline-block;
+    }
 
     hr {
         margin-top: 5px !important;
@@ -97,8 +108,13 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 2. DATA CONNECTION (WITH PEM FIX) ---
+# This block pulls the secrets and "scrubs" the private key to prevent ASN.1 parsing errors
+creds = st.secrets["connections"]["gsheets"].to_dict()
+if "private_key" in creds:
+    creds["private_key"] = creds["private_key"].strip().replace("\\n", "\n")
+
+conn = st.connection("gsheets", type=GSheetsConnection, **creds)
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -116,7 +132,6 @@ def show_toss_popup(row_idx):
     if c1.button("NO, someone will eat it"):
         st.rerun()
     if c2.button("YES, TOSS TUB"):
-        # If it was a half-dot (x.5), it just goes down to the whole number below it
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
         save_data(df)
 
@@ -179,7 +194,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 st.divider()
 
-# --- 5. INVENTORY LIST (SORTED & PETTY DETAILS) ---
+# --- 5. INVENTORY LIST ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
@@ -191,10 +206,9 @@ sorted_display = pd.concat([stocked, out_of_stock])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
-    # No "(Active)" text as requested
     c1.markdown(f"<div class='flavor-name'>{row['name']}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Tapping moves 1 to stock)
+    # RESERVE (Dots)
     res_val = int(row['reserve'])
     res_dots = "● " * res_val if res_val > 0 else "Empty"
     if c2.button(res_dots, key=f"res_{idx}"):
@@ -203,7 +217,7 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] += 1
             save_data(df)
 
-    # STOCK (◒ for half-tubs)
+    # STOCK (Dots & Half-Dots)
     stk_val = float(row['stock'])
     full_tubs = int(stk_val)
     is_scooped = (stk_val % 1 != 0)
@@ -214,16 +228,16 @@ for idx, row in sorted_display.iterrows():
         if is_scooped:
             show_toss_popup(idx)
         else:
-            # Turn a full tub into a half-scooped tub
             df.at[idx, 'stock'] -= 0.5
             save_data(df)
 
-    # TOTAL (Boxed number)
+    # TOTAL (Actual number, boxed)
     total_val = float(row['reserve']) + stk_val
     needs_attention = (total_val <= float(row['low'])) or (float(row['reserve']) == 0)
     
     with c4:
         tc1, tc2 = st.columns([2, 1])
+        # Boxed Total
         if tc1.button(f"[ {int(total_val)} ]", key=f"tot_{idx}"):
             show_detail(idx)
         if needs_attention:
