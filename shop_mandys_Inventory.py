@@ -70,7 +70,7 @@ creds = st.secrets["connections"]["gsheets"].to_dict()
 if "private_key" in creds:
     creds["private_key"] = creds["private_key"].replace("\\n", "\n").strip()
 
-conn = st.connection("gsheets", type=GSheetsConnection, **creds)
+conn = st.connection("gsheets", =GSheetsConnection, **creds)
 df = conn.read(ttl="0s")
 
 def save_data(updated_df):
@@ -188,3 +188,4 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
+
