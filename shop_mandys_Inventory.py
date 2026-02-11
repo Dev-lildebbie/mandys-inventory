@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- 1. SETUP & THEME (EVERY DETAIL LOCKED) ---
+# --- 1. SETUP & THEME (EVERY PETTY DETAIL LOCKED) ---
 st.set_page_config(page_title="Mandy's Inventory", layout="wide")
 
 st.markdown("""
@@ -29,6 +29,7 @@ st.markdown("""
         text-transform: uppercase;
     }
 
+    /* SEARCH BAR - NO WHITE CORNERS */
     div[data-baseweb="input"] {
         border: 5px solid #F06292 !important;
         border-radius: 12px !important;
@@ -65,28 +66,38 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA CONNECTION (THE COMPATIBILITY FIX) ---
-# We keep this as simple as possible so it reads your secrets perfectly.
+# --- 2. DATA CONNECTION ---
+# Using the connection type that works with Python 3.13 + your secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(ttl="0s")
+
+def load_data():
+    df = conn.read(ttl="0s")
+    # Ensure numeric columns are actually numbers
+    numeric_cols = ['reserve', 'stock', 'tossed', 'low', 'high']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    return df
 
 def save_data(updated_df):
     conn.update(data=updated_df)
     st.cache_data.clear()
     st.rerun()
 
-# --- 3. DIALOGS (ALL POPUPS) ---
+df = load_data()
+
+# --- 3. DIALOGS (POPUPS) ---
 
 @st.dialog("Toss this tub?")
 def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name']
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    if c1.button("No, let it be"):
+    if c1.button("NO, someone will eat it"):
         st.rerun()
-    if c2.button("YES, TOSS"):
-        if 'tossed' in df.columns:
-            df.at[row_idx, 'tossed'] = float(df.at[row_idx].get('tossed', 0)) + 0.5
+    if c2.button("YES, TOSS TUB"):
+        # Record loss and remove the half tub
+        df.at[row_idx, 'tossed'] = float(df.at[row_idx].get('tossed', 0)) + 0.5
         df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
         save_data(df)
 
@@ -104,14 +115,14 @@ def show_detail(row_idx):
     c1, c2 = st.columns([2, 1])
     new_amt = c1.number_input("Tubs", min_value=0, step=1, key="deliv_in")
     if c2.button("Add", use_container_width=True):
-        df.at[row_idx, 'reserve'] = int(df.at[row_idx, 'reserve']) + new_amt
+        df.at[row_idx, 'reserve'] += new_amt
         save_data(df)
 
     st.divider()
     st.write("**Thresholds**")
     t1, t2 = st.columns(2)
-    new_high = t1.number_input("High", value=int(flavor.get('high', 5)))
-    new_low = t2.number_input("Low", value=int(flavor.get('low', 1)))
+    new_high = t1.number_input("High", value=int(flavor['high']))
+    new_low = t2.number_input("Low", value=int(flavor['low']))
     if st.button("UPDATE SETTINGS", use_container_width=True):
         df.at[row_idx, 'high'] = new_high
         df.at[row_idx, 'low'] = new_low
@@ -138,49 +149,57 @@ with h1:
     col_a.markdown("<div class='column-label'>FLAVORS</div>", unsafe_allow_html=True)
     if col_b.button("➕"): add_flavor_popup()
     search = st.text_input("S", placeholder="Search...", label_visibility="collapsed")
+
 h2.markdown("<div class='column-label'>RESERVE</div>", unsafe_allow_html=True)
 h3.markdown("<div class='column-label'>STOCK</div>", unsafe_allow_html=True)
 h4.markdown("<div class='column-label'>TOTAL</div>", unsafe_allow_html=True)
 st.divider()
 
-# --- 5. LIST (SORTED: STOCKED AT TOP) ---
+# --- 5. INVENTORY LIST (SORTED & PETTY DETAILS) ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
 
+# Sorting: In-stock flavors at the top
 stocked = display_df[display_df['stock'] > 0]
-out = display_df[display_df['stock'] <= 0]
-sorted_display = pd.concat([stocked, out])
+out_of_stock = display_df[display_df['stock'] <= 0]
+sorted_display = pd.concat([stocked, out_of_stock])
 
 for idx, row in sorted_display.iterrows():
     c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
     
+    # Flavor Name (Removes (Active) automatically)
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Dots)
+    # RESERVE (Tapping moves 1 to stock)
     res_val = int(row['reserve'])
-    res_label = "● " * res_val if res_val > 0 else "Empty"
-    if c2.button(res_label, key=f"res_{idx}"):
+    res_dots = "● " * res_val if res_val > 0 else "Empty"
+    if c2.button(res_dots, key=f"res_{idx}"):
         if res_val > 0:
-            df.at[idx, 'reserve'] = int(df.at[idx, 'reserve']) - 1
-            df.at[idx, 'stock'] = float(df.at[idx, 'stock']) + 1
+            df.at[idx, 'reserve'] -= 1
+            df.at[idx, 'stock'] += 1
             save_data(df)
 
-    # STOCK (Dots & ◒)
+    # STOCK (◒ for half-tubs)
     stk_val = float(row['stock'])
-    stk_visual = ("● " * int(stk_val)) + ("◒" if stk_val % 1 != 0 else "")
+    full_tubs = int(stk_val)
+    is_scooped = (stk_val % 1 != 0)
+    stk_visual = ("● " * full_tubs) + ("◒" if is_scooped else "")
     if stk_visual == "": stk_visual = "Out"
+
     if c3.button(stk_visual, key=f"stk_{idx}"):
-        if stk_val % 1 != 0: 
+        if is_scooped:
             show_toss_popup(idx)
         else:
-            df.at[idx, 'stock'] = float(df.at[idx, 'stock']) - 0.5
+            # Turn a full tub into a half-scooped tub
+            df.at[idx, 'stock'] -= 0.5
             save_data(df)
 
-    # TOTAL (Boxed Number)
+    # TOTAL (Boxed actual number)
     total_val = float(row['reserve']) + stk_val
-    needs_attention = (total_val <= float(row.get('low', 1))) or (float(row['reserve']) == 0)
+    needs_attention = (total_val <= float(row['low'])) or (float(row['reserve']) == 0)
+    
     with c4:
         tc1, tc2 = st.columns([2, 1])
         if tc1.button(f"[ {int(total_val)} ]", key=f"tot_{idx}"):
