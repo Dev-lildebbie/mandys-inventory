@@ -29,7 +29,7 @@ st.markdown("""
         text-transform: uppercase;
     }
 
-    /* SEARCH BAR - NO WHITE CORNERS */
+    /* SEARCH BAR */
     div[data-baseweb="input"] {
         border: 5px solid #F06292 !important;
         border-radius: 12px !important;
@@ -67,12 +67,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. DATA CONNECTION ---
-# Using the connection type that works with Python 3.13 + your secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     df = conn.read(ttl="0s")
-    # Ensure numeric columns are actually numbers
     numeric_cols = ['reserve', 'stock', 'tossed', 'low', 'high']
     for col in numeric_cols:
         if col in df.columns:
@@ -93,15 +91,12 @@ def show_toss_popup(row_idx):
     flavor_name = df.at[row_idx, 'name'].replace("(Active)", "").strip()
     st.write(f"Record a loss for **{flavor_name}**?")
     c1, c2 = st.columns(2)
-    if c1.button("NO, Someone will eat it"):
+    if c1.button("NO, KEEP IT"):
         st.rerun()
     if c2.button("YES, TOSS"):
-        # Fix: Properly check if column exists and update the value
-        current_tossed = float(df.at[row_idx, 'tossed']) if 'tossed' in df.columns else 0
+        current_tossed = float(df.at[row_idx, 'tossed'])
         df.at[row_idx, 'tossed'] = current_tossed + 1
-        
-        # Subtract the half tub from stock
-        df.at[row_idx, 'stock'] = float(df.at[row_idx, 'stock']) - 0.5
+        df.at[row_idx, 'stock'] = 0 # In Rush mode or manual toss, clear it
         save_data(df)
 
 @st.dialog("Deep Dive")
@@ -121,15 +116,6 @@ def show_detail(row_idx):
         df.at[row_idx, 'reserve'] += new_amt
         save_data(df)
 
-    st.divider()
-    st.write("**Thresholds**")
-    t1, t2 = st.columns(2)
-    new_high = t1.number_input("High", value=int(flavor['high']))
-    new_low = t2.number_input("Low", value=int(flavor['low']))
-    if st.button("UPDATE SETTINGS", use_container_width=True):
-        df.at[row_idx, 'high'] = new_high
-        df.at[row_idx, 'low'] = new_low
-        save_data(df)
     if st.button("Close", use_container_width=True):
         st.rerun()
 
@@ -144,8 +130,29 @@ def add_flavor_popup():
         updated_df = pd.concat([df, new_row], ignore_index=True)
         save_data(updated_df)
 
-# --- 4. TOP SECTION ---
+# --- 4. TOP SECTION & CONE TOGGLE ---
 st.markdown("<div class='main-header'><h1>Mandy's Inventory</h1></div>", unsafe_allow_html=True)
+
+# THE CONE BUTTON (RUSH MODE)
+if "rush_active" not in st.session_state:
+    st.session_state.rush_active = False
+
+st.write("")
+col_left, col_mid, col_right = st.columns([1, 2, 1])
+with col_mid:
+    if st.session_state.rush_active:
+        cone_label = "🍦 RUSH MODE ACTIVE ✨"
+        btn_type = "secondary"
+    else:
+        cone_label = "🍦 GO TO RUSH MODE"
+        btn_type = "primary"
+        
+    if st.button(cone_label, use_container_width=True, type=btn_type):
+        st.session_state.rush_active = not st.session_state.rush_active
+        st.rerun()
+
+rush_mode = st.session_state.rush_active
+
 h1, h2, h3, h4 = st.columns([3, 4, 4, 2])
 with h1:
     col_a, col_b = st.columns([3, 1])
@@ -158,7 +165,7 @@ h3.markdown("<div class='column-label'>STOCK</div>", unsafe_allow_html=True)
 h4.markdown("<div class='column-label'>TOTAL</div>", unsafe_allow_html=True)
 st.divider()
 
-# --- 5. INVENTORY LIST (SORTED & PETTY DETAILS) ---
+# --- 5. INVENTORY LIST ---
 display_df = df.copy()
 if search:
     display_df = display_df[display_df['name'].str.contains(search.upper())]
@@ -175,7 +182,7 @@ for idx, row in sorted_display.iterrows():
     clean_name = row['name'].replace("(Active)", "").strip()
     c1.markdown(f"<div class='flavor-name'>{clean_name}</div>", unsafe_allow_html=True)
     
-    # RESERVE (Tapping moves 1 to stock)
+    # RESERVE (Dots)
     res_val = int(row['reserve'])
     res_dots = "● " * res_val if res_val > 0 else "Empty"
     if c2.button(res_dots, key=f"res_{idx}"):
@@ -184,7 +191,7 @@ for idx, row in sorted_display.iterrows():
             df.at[idx, 'stock'] += 1
             save_data(df)
 
-    # STOCK (◒ for half-tubs)
+    # STOCK (Dots/Rush Math)
     stk_val = float(row['stock'])
     full_tubs = int(stk_val)
     is_scooped = (stk_val % 1 != 0)
@@ -192,12 +199,18 @@ for idx, row in sorted_display.iterrows():
     if stk_visual == "": stk_visual = "Out"
 
     if c3.button(stk_visual, key=f"stk_{idx}"):
-        if is_scooped:
-            show_toss_popup(idx)
-        else:
-            # Turn a full tub into a half-scooped tub
-            df.at[idx, 'stock'] -= 0.5
+        if rush_mode:
+            # JULY 2nd MATH: One tap clears the tub entirely
+            df.at[idx, 'tossed'] = float(df.at[idx, 'tossed']) + 1
+            df.at[idx, 'stock'] = 0
             save_data(df)
+        else:
+            # STANDARD MATH: Half-tub logic
+            if is_scooped:
+                show_toss_popup(idx)
+            else:
+                df.at[idx, 'stock'] -= 0.5
+                save_data(df)
 
     # TOTAL (Boxed actual number)
     total_val = float(row['reserve']) + stk_val
@@ -209,6 +222,3 @@ for idx, row in sorted_display.iterrows():
             show_detail(idx)
         if needs_attention:
             tc2.markdown("<span class='thick-alert'>!</span>", unsafe_allow_html=True)
-
-
-
